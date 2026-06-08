@@ -1,0 +1,108 @@
+services:
+
+  # ── Infrastructure ──────────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    ports:
+      - "15672:15672"   # management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      retries: 10
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+
+  # ── Services ────────────────────────────────────────────────────────────────
+
+  auth-service:
+    build: ./src/AuthService
+    environment:
+      ConnectionStrings__Postgres: "Host=postgres;Database=auth_db;Username=postgres;Password=postgres"
+      Jwt__Key: "super-secret-jwt-key-change-in-production-32chars!"
+      RabbitMQ__Host: rabbitmq
+      Otlp__Endpoint: "http://jaeger:4317"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  shortener-service:
+    build: ./src/ShortenerService
+    environment:
+      ConnectionStrings__Postgres: "Host=postgres;Database=shortener_db;Username=postgres;Password=postgres"
+      Jwt__Key: "super-secret-jwt-key-change-in-production-32chars!"
+      RabbitMQ__Host: rabbitmq
+      Otlp__Endpoint: "http://jaeger:4317"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  redirector-service:
+    build: ./src/RedirectorService
+    environment:
+      ConnectionStrings__Postgres: "Host=postgres;Database=shortener_db;Username=postgres;Password=postgres"
+      Otlp__Endpoint: "http://jaeger:4317"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  analytics-service:
+    build: ./src/AnalyticsService
+    environment:
+      ConnectionStrings__Postgres: "Host=postgres;Database=analytics_db;Username=postgres;Password=postgres"
+      Jwt__Key: "super-secret-jwt-key-change-in-production-32chars!"
+      RabbitMQ__Host: rabbitmq
+      Otlp__Endpoint: "http://jaeger:4317"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # ── Frontend ────────────────────────────────────────────────────────────────
+
+  frontend:
+    build: ./frontend
+
+  # ── Gateway ─────────────────────────────────────────────────────────────────
+
+  gateway:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - auth-service
+      - shortener-service
+      - redirector-service
+      - analytics-service
+      - frontend
+
+volumes:
+  postgres_data:
