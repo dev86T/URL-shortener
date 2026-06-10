@@ -13,7 +13,9 @@ builder.Services.AddControllers();
 builder.Services.AddOpenTelemetry()
     .WithTracing(tracing => tracing
         .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("redirector-service"))
-        .AddAspNetCoreInstrumentation()
+        .AddAspNetCoreInstrumentation()        // входящие HTTP запросы
+        .AddHttpClientInstrumentation()        // исходящие HTTP запросы между сервисами
+        .AddSource("Npgsql")                   // SQL запросы к PostgreSQL
         .AddOtlpExporter(o => o.Endpoint = new Uri(builder.Configuration["Otlp:Endpoint"]!)));
 
 builder.Services.AddHealthChecks()
